@@ -263,6 +263,7 @@ def run() -> Dict[str, Any]:
         start=start, end=end,
         quarterly_fundamental_months=cad["quarterly_fundamental_months"],
         semiannual_reconstitution_months=cad["semiannual_reconstitution_months"],
+        rebalance_months=cad.get("rebalance_months"),  # None=monthly; [6,12]=semi-annual
     )
     LOG.info(f"Generated {len(schedule)} rebalance events.")
 

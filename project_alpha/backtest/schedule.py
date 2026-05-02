@@ -43,10 +43,16 @@ def build_schedule(
     end: pd.Timestamp,
     quarterly_fundamental_months: Iterable[int],
     semiannual_reconstitution_months: Iterable[int],
+    rebalance_months: Iterable[int] = None,
 ) -> List[ScheduleEvent]:
     """Produce one event per month-end in [start, end].
 
     Each event is anchored to the last trading day of that calendar month.
+
+    Args:
+        rebalance_months: If provided (e.g., [6, 12] for semi-annual or
+            [3, 6, 9, 12] for quarterly), only emit events in those months.
+            If None (default), emit every month (i.e. monthly rebalancing).
     """
     cal = pd.DatetimeIndex(sorted(set(pd.Timestamp(d).normalize() for d in trading_dates)))
     cal = cal[(cal >= pd.Timestamp(start).normalize()) & (cal <= pd.Timestamp(end).normalize())]
@@ -55,6 +61,8 @@ def build_schedule(
 
     fund_months = {int(m) for m in quarterly_fundamental_months}
     recon_months = {int(m) for m in semiannual_reconstitution_months}
+    # If rebalance_months provided, restrict events to those months only.
+    rebal_months = {int(m) for m in rebalance_months} if rebalance_months is not None else None
 
     months = pd.PeriodIndex(cal, freq="M").unique()
     events: List[ScheduleEvent] = []
@@ -63,6 +71,9 @@ def build_schedule(
         if len(in_month) == 0:
             continue
         last_d = in_month[-1]
+        # Skip months not in the rebalance schedule (when filter is active)
+        if rebal_months is not None and int(last_d.month) not in rebal_months:
+            continue
         events.append(ScheduleEvent(
             date=last_d,
             reconstitute=(int(last_d.month) in recon_months),
