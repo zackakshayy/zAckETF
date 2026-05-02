@@ -1,4 +1,4 @@
-# Project Alpha (Active AI ETF) — v2
+# Project Alpha (Active AI ETF)
 
 Production-ready Python modules to construct, score, backtest, and validate a **sector-matched Active ETF** that tracks **Russell 1000 sector weights** while aiming to outperform **Russell 1000 (IWB)** and **RECS ETF**.
 
