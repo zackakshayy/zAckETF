@@ -1,0 +1,180 @@
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+.python-version
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# =============================================================================
+# Secrets & credentials  — NEVER commit
+# =============================================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cer
+*.crt
+*.p12
+secrets/
+credentials/
+.aws/
+.ssh/
+config.local.*
+*.secrets.yaml
+*.secrets.yml
+*.secrets.json
+
+# Common API key file names
+api_keys.*
+apikeys.*
+keys.json
+keys.yaml
+
+# =============================================================================
+# Local config — user-specific paths must NOT leak
+# =============================================================================
+# (NOTE: inline `# comments` after a path are NOT supported by .gitignore;
+#  comments must be on their own line)
+# alpha.yaml contains absolute /Users/... paths — keep local only
+config/alpha.yaml
+config/alpha.local.yaml
+config/*.local.yaml
+!config/alpha.yaml.example
+!config/*.example
+
+# =============================================================================
+# Data, caches, outputs — large or user-specific
+# =============================================================================
+cache/
+.cache/
+_px_cache/
+_px_reports/
+recs_cache/
+
+# Backtest outputs (regenerated each run)
+*.parquet
+!tests/**/*.parquet      # keep tiny test fixtures if any
+output/
+outputs/
+results/
+plots/
+plots_*/
+charts/
+
+# Reports may be regenerated
+reports/
+*_reports/
+
+# Logs & runtime artifacts
+logs/
+*.log
+*.pid
+*.seed
+*.swo
+*.swp
+
+# =============================================================================
+# Datasets — large CSVs, parquets, market data
+# =============================================================================
+data/
+ProjectX_MasterData/
+*.csv.gz
+*.h5
+*.hdf5
+*.feather
+*.arrow
+*.xlsx
+*.xls
+!tests/**/*.xlsx       # except small test fixtures
+!docs/**/*.xlsx
+
+# =============================================================================
+# OS / IDE / editor cruft
+# =============================================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# JetBrains
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VS Code
+.vscode/
+!.vscode/settings.json.example
+!.vscode/extensions.json
+
+# Sublime
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+.netrwhist
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# =============================================================================
+# Misc
+# =============================================================================
+*.bak
+*.tmp
+*.temp
+*.old
+node_modules/

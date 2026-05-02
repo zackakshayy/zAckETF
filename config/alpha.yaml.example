@@ -1,0 +1,140 @@
+# project_alpha — single canonical config (TEMPLATE)
+#
+# COPY THIS FILE to `config/alpha.yaml` and fill in absolute paths for your
+# local data root. The real `config/alpha.yaml` is gitignored to prevent
+# leaking machine-specific paths into version control.
+#
+# Required directory layout under <data_root>:
+#   <data_root>/categorized/prices/         <- EOD price parquets (per-ticker)
+#   <data_root>/categorized/fundamentals/   <- EODHD JSON dumps
+#   <data_root>/categorized/news/           <- News JSON dumps
+#   <data_root>/categorized/macro/          <- FRED macro CSVs
+#
+# Plus a top-level Russell 1000 holdings file (xlsx) and writable dirs for
+# reports & cache.
+#
+# Rebalance cadences (all run on month-ends):
+#   - Semi-annual reconstitution  (Jun-30 / Dec-31)        : refresh universe from R1000
+#   - Quarterly fundamental rebal (Feb / May / Aug / Nov)   : refresh fundamental scores
+#   - Monthly technical+macro     (every month-end)         : refresh tech, sentiment, macro regime
+
+paths:
+  # Replace <DATA_ROOT> with your absolute master-data path
+  data_root:        "<DATA_ROOT>/categorized"
+  prices_dir:       "<DATA_ROOT>/categorized/prices"
+  fundamentals_dir: "<DATA_ROOT>/categorized/fundamentals"
+  news_dir:         "<DATA_ROOT>/categorized/news"
+  macro_dir:        "<DATA_ROOT>/categorized/macro"
+  russell_xlsx:     "<DATA_ROOT>/R1000.xlsx"
+  reports_dir:      "<DATA_ROOT>/_px_reports"
+  cache_dir:        "<DATA_ROOT>/_px_cache"
+
+backtest:
+  start: "2015-05-01"
+  end:   "2025-04-30"
+  initial_nav: 1_000_000
+  benchmark_ticker: "IWB"      # Russell 1000 ETF
+  warmup_days: 252
+
+universe:
+  source: "russell_1000"
+  reconstitution_dates: ["06-30", "12-31"]
+  reconstitution_anchor: "06-30"
+  snapshot_tolerance_days: 14
+  min_history_days: 252
+  exclude_asset_types: ["Cash", "Bond"]
+  sector_source: "russell_xlsx"
+
+cadence:
+  monthly_rebalance:    true
+  quarterly_fundamental_months: [2, 5, 8, 11]
+  semiannual_reconstitution_months: [6, 12]
+
+scoring:
+  technical:
+    momentum_12_1_days: 252
+    momentum_12_1_skip_days: 21
+    momentum_6_1_days: 126
+    vol_lookback_days: 252
+    high52_lookback_days: 252
+    short_term_reversal_days: 21
+  fundamental:
+    use_highlights_ratios: true
+    quarterly_fallback: true
+    winsorize_z: 3.0
+  sentiment:
+    window_days: 90
+    half_life_days: 30
+    use_precomputed_polarity: true
+    relevance_weight: "inverse_symbol_count"
+    min_articles: 3
+  macro:
+    regime_lookback_years: 5
+    series:
+      vix:    "VIXCLS"
+      slope:  "T10Y2Y"
+      ff:     "FEDFUNDS"
+      tb3m:   "TB3MS"
+      cpi:    "CPIAUCSL"
+      unrate: "UNRATE"
+      gdp:    "GDPC1"
+  composite:
+    # iter-10 champion: drop fundamental (always-negative IC), focus tech/lowvol
+    base_weights:
+      technical:   0.45
+      fundamental: 0.0
+      sentiment:   0.10
+      lowvol:      0.40
+      macro:       0.05
+    risk_off_tilt: { technical: -0.10, fundamental: 0.0, sentiment: -0.03, lowvol: +0.07, macro: +0.06 }
+    risk_on_tilt:  { technical: +0.10, fundamental: 0.0, sentiment: +0.03, lowvol: -0.07, macro: -0.06 }
+    sector_neutralize: false
+    dynamic_pillar_weights: true
+    exclude_pillars: ["fundamental"]
+    ic_lookback_events: 12
+    ic_floor: 0.05
+    ic_cap: 0.60
+    quality_momentum_gate_w: 0.25
+    vol_regime_gate_threshold: 0.75
+    vol_regime_gate_shift_max: 0.10
+
+modeling:
+  enabled: false
+  type: "ridge"
+  ridge_alpha: 5.0
+  label_horizon_days: 21
+  seed: 42
+
+portfolio:
+  long_only: true
+  max_name_weight: 0.05
+  min_name_weight: 0.001
+  max_sector_active: 0.03
+  sector_active_band: 0.0
+  adv_consume_fraction: 0.10
+  adv_lookback_days: 60
+  beta_target: 1.00
+  beta_tol: 0.10
+  lambda_risk: 5.0
+  lambda_turnover: 4.0
+  trade_cost_bps: 8
+  turnover_no_trade_band: 0.0
+  score_no_trade_band: 0.25
+  top_quintile_filter: true
+  quintile_keep: 0.20
+  min_names_per_sector: 3
+  drawdown_overlay: false
+  drawdown_threshold: -0.08
+  drawdown_vix_pctile: 0.80
+  drawdown_scale: 0.60
+  # Iter-10 champion: 55% IWB core + 45% multi-factor tilt
+  core_iwb_weight: 0.55
+
+reporting:
+  write_constituents: true
+  write_scores: true
+  write_nav: true
+  write_attribution: true
+
+logging:
+  level: "INFO"

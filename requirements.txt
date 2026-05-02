@@ -1,0 +1,23 @@
+# Project Alpha — runtime dependencies
+# Pinned to ranges that are known to work together. Tighten to == for prod releases.
+
+# Core data / numerics
+numpy>=1.24,<3
+pandas>=2.0,<3
+pyarrow>=12.0           # parquet I/O (constituents, scores, EOD)
+openpyxl>=3.1           # R1000.xlsx reader
+
+# Config + validation
+pyyaml>=6.0
+jsonschema>=4.0
+
+# Optimizer
+cvxpy>=1.4
+ecos>=2.0               # primary cone solver
+scs>=3.0                # SCS fallback
+
+# CLI / progress
+tqdm>=4.65
+
+# Test (optional in prod, required for CI)
+pytest>=7.0
