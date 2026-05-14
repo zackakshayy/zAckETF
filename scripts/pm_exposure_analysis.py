@@ -351,6 +351,9 @@ def active_share_analysis(constituents_parquet: Path, sector_weights_csv: Path, 
     # all R1000 names in that sector (~ 1000 names / 11 sectors ~ 90 names/sector).
     # So benchmark per-stock weight ~ sector_w / sector_n.
     cons = pd.read_parquet(constituents_parquet)
+    # Handle column name: 'asof' is the date column in constituents
+    if "date" not in cons.columns and "asof" in cons.columns:
+        cons["date"] = cons["asof"]
     if "weight" not in cons.columns:
         cons["weight"] = 1.0 / cons.groupby("date").size().reindex(cons["date"]).values
     # Last snapshot
@@ -400,6 +403,9 @@ def active_share_analysis(constituents_parquet: Path, sector_weights_csv: Path, 
 # ----------------- Top Active Positions ------------------------------------
 def top_active_positions(constituents_parquet: Path, out_dir: Path, top_n: int = 20) -> pd.DataFrame:
     cons = pd.read_parquet(constituents_parquet)
+    # Handle column name: 'asof' is the date column in constituents
+    if "date" not in cons.columns and "asof" in cons.columns:
+        cons["date"] = cons["asof"]
     last_date = cons["date"].max()
     last = cons[cons["date"] == last_date].copy()
     if "weight" not in last.columns:
