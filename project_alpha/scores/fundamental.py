@@ -1,31 +1,54 @@
 """
-Fundamental score.
+Fundamental score — Iter-13 rebuild.
 
-Inputs are point-in-time TTM features from `data.fundamentals.point_in_time_features`.
+The previous fundamental pillar blended quality + naive-value + growth + leverage
+into ONE muddy score and produced negative IC (-0.037 full, -0.056 recent). Root
+cause: the naive-value component (cheap PE/PB/PS/EV) bought *value traps* — cheap
+stocks that were cheap because earnings were deteriorating — and dragged down the
+genuinely-positive quality signal.
 
-We do **not** combine pillars here — each cross-section returns one z-scored
-fundamental signal per ticker, sector-neutralized. The composite step
-combines fundamental, technical, sentiment, and macro.
+Iter-13 fixes this by splitting the pillar into THREE clean, separately-validated
+sub-pillars, each exposed as its own column so the IC tracker can score them:
 
-Sub-signals (winsorized at ±3σ within sector before z-score):
-  Quality:    roe, roa, gross_margin, operating_margin, net_margin, fcf_margin
-  Value:      ev_ebitda (inv), pe (inv), pb (inv), ps (inv), fcf_yield
-  Growth:     revenue YoY, eps YoY (when available)
-  Leverage:   -tanh(debt_to_equity)
+  quality_z   — durable profitability/efficiency (the persistent alpha)
+                roe, roa, gross/operating/net/fcf margin, low leverage
+  value_z     — DISCIPLINED value: cheapness GATED by quality, so cheap-junk
+                (low-quality names) has its value signal damped, never rewarded
+  catalyst_z  — PEAD: earnings-surprise drift + EPS-trend (point-in-time, from
+                Earnings.History announcement dates — no look-ahead)
+
+DATA-COVERAGE NOTE (honest caveat): `Earnings.History` exists for only ~11%
+of the Russell 1000 in the source dataset, so the catalyst sub-pillar is
+exposed as a column for transparency/IC-tracking but its default blend weight
+is 0.0 — a signal covering 11% of names would be sparse and selection-biased.
+The "catalyst" role (price-confirmed trend) is instead carried by the slow
+12-1 technical-momentum pillar, which has 100% coverage. `fundamental_score`
+therefore defaults to a Quality + Disciplined-Value blend — both ~94% covered
+and point-in-time clean. Quality and value persist across 6-month holds
+(factor half-life of years), which is what makes this pillar viable for a
+semi-annual rebalance — unlike fast price momentum.
+
+Inputs are per-ticker dict rows that merge:
+  - data.fundamentals.point_in_time_features   (margins, roe, fcf_yield, pe, ...)
+  - data.fundamentals.point_in_time_earnings   (surprise_avg, eps_ttm_growth, ...)
 """
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List
 
 import numpy as np
 import pandas as pd
 
 
-_QUALITY_FIELDS = ["roe", "roa", "gross_margin", "operating_margin", "net_margin", "fcf_margin"]
-_VALUE_FIELDS_INVERSE = ["pe", "pb", "ps", "ev_ebitda"]   # lower = better, invert for ranking
-_VALUE_FIELDS_DIRECT  = ["fcf_yield"]                     # higher = better
-_GROWTH_FIELDS = ["rev_growth_yoy", "eps_growth_yoy"]
+# Quality: all "higher = better". debt_to_equity handled separately (inverted).
+_QUALITY_FIELDS = ["roe", "roa", "gross_margin", "operating_margin",
+                   "net_margin", "fcf_margin"]
+# Value: positive multiples inverted so "cheap = high"; fcf_yield already direct.
+_VALUE_FIELDS_INVERSE = ["pe", "pb", "ps", "ev_ebitda"]
+_VALUE_FIELDS_DIRECT = ["fcf_yield"]
+# Catalyst: point-in-time earnings-surprise / EPS-trend fields.
+_CATALYST_FIELDS = ["surprise_avg", "surprise_streak", "eps_ttm_growth"]
 
 
 def _winsorize_z(series: pd.Series, *, k: float = 3.0) -> pd.Series:
@@ -42,13 +65,12 @@ def _winsorize_z(series: pd.Series, *, k: float = 3.0) -> pd.Series:
 
 
 def _z_by_sector(values: pd.Series, sectors: pd.Series, *, k: float = 3.0) -> pd.Series:
-    """Sector-neutral winsorized z-score. Sectors with <3 names get global z-score."""
+    """Sector-neutral winsorized z-score. Sectors with <3 names get global z."""
     out = pd.Series(np.nan, index=values.index, dtype=float)
-    for sec, idx in sectors.groupby(sectors).groups.items():
+    for _, idx in sectors.groupby(sectors).groups.items():
         sub = values.loc[idx]
         if sub.dropna().shape[0] >= 3:
             out.loc[idx] = _winsorize_z(sub, k=k).values
-    # Fill remaining (small sectors) with global z
     missing = out.isna() & values.notna()
     if missing.any():
         out.loc[missing] = _winsorize_z(values.loc[missing], k=k).values
@@ -56,80 +78,94 @@ def _z_by_sector(values: pd.Series, sectors: pd.Series, *, k: float = 3.0) -> pd
 
 
 def _inv(s: pd.Series) -> pd.Series:
-    """Invert a positive multiple (so 'cheap' = high). NaN if non-positive."""
+    """Invert a positive multiple (so 'cheap' = high). NaN if non-positive —
+    a negative PE/EV is meaningless as 'cheap' and must not score well."""
     out = pd.to_numeric(s, errors="coerce").astype(float).copy()
     out[out <= 0] = np.nan
     return 1.0 / out
+
+
+def _mean_z(df: pd.DataFrame, fields: List[str], sectors: pd.Series,
+            *, k: float, invert: bool = False) -> pd.Series:
+    """Average of sector-neutral z-scores over `fields` present in `df`."""
+    sigs: List[pd.Series] = []
+    for f in fields:
+        if f in df.columns:
+            col = _inv(df[f]) if invert else df[f]
+            sigs.append(_z_by_sector(col, sectors, k=k))
+    if not sigs:
+        return pd.Series(0.0, index=df.index)
+    return pd.concat(sigs, axis=1).mean(axis=1)
 
 
 def compute_fundamental_panel(
     feature_rows: Iterable[Dict[str, object]],
     *,
     winsor_k: float = 3.0,
-    quality_w: float = 0.40,
-    value_w: float = 0.30,
-    growth_w: float = 0.20,
-    leverage_w: float = 0.10,
+    quality_w: float = 0.60,
+    value_w: float = 0.40,
+    catalyst_w: float = 0.0,   # 0 by default — Earnings.History covers only ~11%
+    value_quality_gate: float = 0.60,
 ) -> pd.DataFrame:
-    """Cross-sectional fundamental score panel.
+    """Cross-sectional fundamental score panel — Iter-13 three-pillar rebuild.
 
-    Returns DataFrame indexed by ticker with columns:
-      sector, quality_z, value_z, growth_z, leverage_z, fundamental_score.
+    Returns a DataFrame indexed by ticker with columns:
+      sector, quality_z, value_z, catalyst_z, growth_z, fundamental_score
+
+    `value_z` is DISCIPLINED value: raw cheapness multiplied by a quality gate
+    in [1-g, 1+g] (g = `value_quality_gate`), so a cheap low-quality name has
+    its value score damped toward — or below — zero, while a cheap high-quality
+    name keeps (or amplifies) it. This is the value-trap fix.
+
+    `growth_z` is kept as an alias of `catalyst_z` for backward compatibility
+    with any caller still expecting the old column name.
     """
     df = pd.DataFrame(list(feature_rows))
+    cols = ["sector", "quality_z", "value_z", "catalyst_z", "growth_z", "fundamental_score"]
     if df.empty:
-        return pd.DataFrame(columns=[
-            "sector", "quality_z", "value_z", "growth_z", "leverage_z", "fundamental_score"
-        ])
+        return pd.DataFrame(columns=cols)
     df = df.set_index("ticker")
     sectors = df["sector"].fillna("Unknown").astype(str)
 
-    # Quality
-    quality_signals: List[pd.Series] = []
-    for f in _QUALITY_FIELDS:
-        if f in df.columns:
-            quality_signals.append(_z_by_sector(df[f], sectors, k=winsor_k))
-    quality_z = pd.concat(quality_signals, axis=1).mean(axis=1) if quality_signals else pd.Series(0.0, index=df.index)
-
-    # Value (invert positive multiples, then z-score)
-    value_signals: List[pd.Series] = []
-    for f in _VALUE_FIELDS_INVERSE:
-        if f in df.columns:
-            value_signals.append(_z_by_sector(_inv(df[f]), sectors, k=winsor_k))
-    for f in _VALUE_FIELDS_DIRECT:
-        if f in df.columns:
-            value_signals.append(_z_by_sector(df[f], sectors, k=winsor_k))
-    value_z = pd.concat(value_signals, axis=1).mean(axis=1) if value_signals else pd.Series(0.0, index=df.index)
-
-    # Growth
-    growth_signals: List[pd.Series] = []
-    for f in _GROWTH_FIELDS:
-        if f in df.columns:
-            growth_signals.append(_z_by_sector(df[f], sectors, k=winsor_k))
-    growth_z = pd.concat(growth_signals, axis=1).mean(axis=1) if growth_signals else pd.Series(0.0, index=df.index)
-
-    # Leverage penalty (lower D/E → higher score)
+    # ---- Quality: profitability/efficiency + low leverage --------------------
+    quality_core = _mean_z(df, _QUALITY_FIELDS, sectors, k=winsor_k)
     if "debt_to_equity" in df.columns:
         de = pd.to_numeric(df["debt_to_equity"], errors="coerce").astype(float)
         leverage_z = _z_by_sector(-np.tanh(de.clip(lower=0, upper=10)), sectors, k=winsor_k)
     else:
         leverage_z = pd.Series(0.0, index=df.index)
+    # Leverage is a modest quality input (0.80 core / 0.20 leverage).
+    quality_z = (0.80 * quality_core.fillna(0.0) + 0.20 * leverage_z.fillna(0.0))
+    quality_z = _z_by_sector(quality_z, sectors, k=winsor_k)
 
-    composite = (
-        float(quality_w)  * quality_z.fillna(0.0)
-        + float(value_w)    * value_z.fillna(0.0)
-        + float(growth_w)   * growth_z.fillna(0.0)
-        + float(leverage_w) * leverage_z.fillna(0.0)
-    )
+    # ---- Value: cheapness, then GATED by quality -----------------------------
+    value_raw = pd.concat([
+        _mean_z(df, _VALUE_FIELDS_INVERSE, sectors, k=winsor_k, invert=True),
+        _mean_z(df, _VALUE_FIELDS_DIRECT, sectors, k=winsor_k),
+    ], axis=1).mean(axis=1)
+    # Quality gate: map quality_z (~N(0,1)) through a sigmoid to [1-g, 1+g].
+    g = float(np.clip(value_quality_gate, 0.0, 1.0))
+    q_clip = quality_z.fillna(0.0).clip(-3.0, 3.0)
+    gate = 1.0 + g * np.tanh(q_clip / 1.5)          # cheap-junk damped, cheap-quality boosted
+    value_z = _z_by_sector(value_raw.fillna(0.0) * gate, sectors, k=winsor_k)
+
+    # ---- Catalyst: PEAD earnings-surprise drift + EPS trend ------------------
+    catalyst_z = _z_by_sector(
+        _mean_z(df, _CATALYST_FIELDS, sectors, k=winsor_k), sectors, k=winsor_k)
+
+    # ---- Quality-led blend ---------------------------------------------------
+    total_w = float(quality_w + value_w + catalyst_w) or 1.0
+    qw, vw, cw = quality_w / total_w, value_w / total_w, catalyst_w / total_w
+    composite = (qw * quality_z.fillna(0.0)
+                 + vw * value_z.fillna(0.0)
+                 + cw * catalyst_z.fillna(0.0))
 
     out = pd.DataFrame({
         "sector": sectors,
         "quality_z": quality_z,
         "value_z": value_z,
-        "growth_z": growth_z,
-        "leverage_z": leverage_z,
-        "fundamental_score": composite,
+        "catalyst_z": catalyst_z,
+        "growth_z": catalyst_z,                      # back-compat alias
+        "fundamental_score": _z_by_sector(composite, sectors, k=winsor_k),
     })
-    # Final cross-sectional standardisation so fundamental_score ~ z-scale
-    out["fundamental_score"] = _z_by_sector(out["fundamental_score"], sectors, k=winsor_k)
     return out

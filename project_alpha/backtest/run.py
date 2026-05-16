@@ -30,7 +30,7 @@ from project_alpha.config import get_cfg
 from project_alpha.data import (
     load_russell_panel, universe_for_date, sector_targets_for_date,
     load_eod, build_returns_panel, adv20_panel, last_price_series,
-    point_in_time_features,
+    point_in_time_features, point_in_time_earnings,
     list_monthly_files, load_news_window, aggregate_sentiment_window,
     load_macro_panel,
 )
@@ -122,6 +122,11 @@ def _refresh_fundamental_panel(
         feats = point_in_time_features(fund_dir, t, asof, last_price=last_price_map.get(t))
         if not feats:
             continue
+        # Iter-13: merge point-in-time earnings-surprise (PEAD) features so the
+        # rebuilt fundamental pillar can score the catalyst sub-pillar.
+        earn = point_in_time_earnings(fund_dir, t, asof)
+        for k in ("surprise_last", "surprise_avg", "surprise_streak", "eps_ttm_growth"):
+            feats[k] = earn.get(k)
         feats["sector"] = sector_map.get(t) or feats.get("sector") or "Unknown"
         rows.append(feats)
     return compute_fundamental_panel(rows)
@@ -258,13 +263,18 @@ def run() -> Dict[str, Any]:
 
     # ---- Schedule ----
     cad = cfg["cadence"]
+    # rebalance_months: None → monthly; [6,12] → semi-annual; [3,6,9,12] → quarterly.
+    # When monthly_rebalance is true the filter is dropped (monthly cadence).
+    rebal_months = None if cad.get("monthly_rebalance", True) else cad.get("rebalance_months")
     schedule = build_schedule(
         trading_dates,
         start=start, end=end,
         quarterly_fundamental_months=cad["quarterly_fundamental_months"],
         semiannual_reconstitution_months=cad["semiannual_reconstitution_months"],
+        rebalance_months=rebal_months,
     )
-    LOG.info(f"Generated {len(schedule)} rebalance events.")
+    LOG.info(f"Generated {len(schedule)} rebalance events "
+             f"(cadence: {'monthly' if rebal_months is None else sorted(rebal_months)}).")
 
     # ---- Caches (refreshed on cadence) ----
     eod_cache: Dict[str, pd.DataFrame] = {}

@@ -15,7 +15,7 @@ We snap rule-driven dates to the actual trading calendar (so `12-31` becomes
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from typing import Iterable, List, Sequence
+from typing import Iterable, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -43,10 +43,20 @@ def build_schedule(
     end: pd.Timestamp,
     quarterly_fundamental_months: Iterable[int],
     semiannual_reconstitution_months: Iterable[int],
+    rebalance_months: Optional[Iterable[int]] = None,
 ) -> List[ScheduleEvent]:
-    """Produce one event per month-end in [start, end].
+    """Produce one rebalance event per eligible month-end in [start, end].
 
     Each event is anchored to the last trading day of that calendar month.
+
+    `rebalance_months` sets the rebalance cadence:
+      - None         → every month-end (monthly cadence, legacy behaviour)
+      - [6, 12]      → semi-annual (June & December)
+      - [3, 6, 9, 12]→ quarterly
+    Months not in the set emit no event, so the portfolio is held unchanged
+    across them — this is what makes a *true* semi-annual / quarterly backtest
+    (without this filter, the config's `rebalance_months` is silently ignored
+    and every backtest rebalances monthly).
     """
     cal = pd.DatetimeIndex(sorted(set(pd.Timestamp(d).normalize() for d in trading_dates)))
     cal = cal[(cal >= pd.Timestamp(start).normalize()) & (cal <= pd.Timestamp(end).normalize())]
@@ -55,6 +65,7 @@ def build_schedule(
 
     fund_months = {int(m) for m in quarterly_fundamental_months}
     recon_months = {int(m) for m in semiannual_reconstitution_months}
+    rebal_months = {int(m) for m in rebalance_months} if rebalance_months else None
 
     months = pd.PeriodIndex(cal, freq="M").unique()
     events: List[ScheduleEvent] = []
@@ -63,6 +74,10 @@ def build_schedule(
         if len(in_month) == 0:
             continue
         last_d = in_month[-1]
+        # Cadence filter: when rebalance_months is set, skip non-eligible months
+        # so the portfolio is genuinely held across them.
+        if rebal_months is not None and int(last_d.month) not in rebal_months:
+            continue
         events.append(ScheduleEvent(
             date=last_d,
             reconstitute=(int(last_d.month) in recon_months),
