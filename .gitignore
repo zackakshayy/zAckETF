@@ -126,7 +126,9 @@ logs/
 # =============================================================================
 # Datasets — large CSVs, parquets, market data
 # =============================================================================
-data/
+# NOTE: leading slash anchors to repo root. A bare `data/` also matches the
+# Python package `project_alpha/data/` and silently drops it from the repo.
+/data/
 ProjectX_MasterData/
 *.csv.gz
 *.h5
